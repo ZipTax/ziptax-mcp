@@ -5,7 +5,7 @@ An HTTP [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server 
 ## MCP Endpoint
 
 ```
-https://mcp.zip-tax.com/mcp
+https://mcp.zip-tax.com
 ```
 
 ## Authentication

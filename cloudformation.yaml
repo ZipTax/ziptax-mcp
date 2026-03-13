@@ -304,7 +304,7 @@ Outputs:
 
   MCPEndpoint:
     Description: MCP Server Endpoint
-    Value: !Sub 'https://${DomainName}/mcp'
+    Value: !Sub 'https://${DomainName}/'
 
   HostedZoneId:
     Description: Route53 Hosted Zone ID (add NS records to parent zone)

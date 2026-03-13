@@ -47,10 +47,10 @@ func main() {
 	})
 
 	httpServer := server.NewStreamableHTTPServer(mcpServer,
-		server.WithEndpointPath("/mcp"),
+		server.WithEndpointPath("/"),
 		server.WithStateLess(true),
 	)
-	mux.Handle("/mcp", httpServer)
+	mux.Handle("/", httpServer)
 
 	addr := fmt.Sprintf("0.0.0.0:%s", port)
 	srv := &http.Server{
@@ -63,7 +63,7 @@ func main() {
 
 	go func() {
 		log.Printf("ZipTax MCP Server starting on %s", addr)
-		log.Printf("MCP endpoint: %s/mcp", addr)
+		log.Printf("MCP endpoint: %s/", addr)
 		log.Printf("Health endpoint: %s/health", addr)
 		log.Printf("Proxying to: %s", apiBaseURL)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
