@@ -13,13 +13,9 @@ import (
 const defaultVersion = "v60"
 
 // extractAPIKey retrieves the ZipTax API key from (in priority order):
-//  1. The "api_key" tool parameter (explicit per-call override)
-//  2. The X-API-KEY request header
-//  3. The Authorization request header (with or without "Bearer " prefix)
+//  1. The X-API-KEY request header
+//  2. The Authorization request header (with or without "Bearer " prefix)
 func extractAPIKey(request mcp.CallToolRequest) string {
-	if key := request.GetString("api_key", ""); key != "" {
-		return key
-	}
 	if key := request.Header.Get("X-API-KEY"); key != "" {
 		return key
 	}
@@ -45,11 +41,8 @@ func lookupTaxRateTool() mcp.Tool {
 			"Look up sales and use tax rates for a US or Canadian location. "+
 				"Provide a postal code at minimum, or a full address for more precise results. "+
 				"Returns tax rates broken down by jurisdiction (state, county, city, district). "+
-				"Requires a valid ZipTax API key. Pass it as the api_key parameter, or via the X-API-KEY / Authorization header. "+
+				"Requires a valid ZipTax API key via the X-API-KEY or Authorization header. "+
 				"Get a key at https://platform.zip.tax"),
-		mcp.WithString("api_key",
-			mcp.Description("ZipTax API key (overrides any key sent via header)"),
-		),
 		mcp.WithString("postalcode",
 			mcp.Description("US ZIP code (5-digit) or Canadian postal code"),
 		),
@@ -96,7 +89,7 @@ func lookupTaxRateHandler(client *ZipTaxClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		apiKey := extractAPIKey(request)
 		if apiKey == "" {
-			return mcp.NewToolResultError("Missing API key. Pass it as the api_key parameter, or via the X-API-KEY / Authorization header. Get a key at https://platform.zip.tax"), nil
+			return mcp.NewToolResultError("Missing API key. Send it via the X-API-KEY or Authorization header. Get a key at https://platform.zip.tax"), nil
 		}
 
 		params := make(map[string]string)
@@ -137,11 +130,8 @@ func getAccountMetricsTool() mcp.Tool {
 		mcp.WithDescription(
 			"Get account usage metrics and quota information for the authenticated ZipTax account. "+
 				"Returns current request counts, limits, and entitlements. "+
-				"Requires a valid ZipTax API key. Pass it as the api_key parameter, or via the X-API-KEY / Authorization header. "+
+				"Requires a valid ZipTax API key via the X-API-KEY or Authorization header. "+
 				"Get a key at https://platform.zip.tax"),
-		mcp.WithString("api_key",
-			mcp.Description("ZipTax API key (overrides any key sent via header)"),
-		),
 	)
 }
 
@@ -149,7 +139,7 @@ func getAccountMetricsHandler(client *ZipTaxClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		apiKey := extractAPIKey(request)
 		if apiKey == "" {
-			return mcp.NewToolResultError("Missing API key. Pass it as the api_key parameter, or via the X-API-KEY / Authorization header. Get a key at https://platform.zip.tax"), nil
+			return mcp.NewToolResultError("Missing API key. Send it via the X-API-KEY or Authorization header. Get a key at https://platform.zip.tax"), nil
 		}
 
 		result, err := client.GetAccountMetrics(apiKey, defaultVersion)
