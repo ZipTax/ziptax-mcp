@@ -4,12 +4,27 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
 
 const defaultVersion = "v60"
+
+// extractAPIKey retrieves the ZipTax API key from the request headers.
+// Checks X-API-KEY first, then falls back to Authorization header
+// (with or without "Bearer " prefix) for broader MCP client compatibility.
+func extractAPIKey(request mcp.CallToolRequest) string {
+	if key := request.Header.Get("X-API-KEY"); key != "" {
+		return key
+	}
+	if auth := request.Header.Get("Authorization"); auth != "" {
+		auth = strings.TrimPrefix(auth, "Bearer ")
+		return strings.TrimSpace(auth)
+	}
+	return ""
+}
 
 // RegisterTools registers all MCP tools on the given server.
 func RegisterTools(s *server.MCPServer, client *ZipTaxClient) {
@@ -71,9 +86,9 @@ func lookupTaxRateTool() mcp.Tool {
 
 func lookupTaxRateHandler(client *ZipTaxClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		apiKey := request.Header.Get("X-API-KEY")
+		apiKey := extractAPIKey(request)
 		if apiKey == "" {
-			return mcp.NewToolResultError("Missing X-API-KEY header. Get an API key at https://platform.zip.tax"), nil
+			return mcp.NewToolResultError("Missing API key. Send it via the X-API-KEY or Authorization header. Get a key at https://platform.zip.tax"), nil
 		}
 
 		params := make(map[string]string)
@@ -120,9 +135,9 @@ func getAccountMetricsTool() mcp.Tool {
 
 func getAccountMetricsHandler(client *ZipTaxClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		apiKey := request.Header.Get("X-API-KEY")
+		apiKey := extractAPIKey(request)
 		if apiKey == "" {
-			return mcp.NewToolResultError("Missing X-API-KEY header. Get an API key at https://platform.zip.tax"), nil
+			return mcp.NewToolResultError("Missing API key. Send it via the X-API-KEY or Authorization header. Get a key at https://platform.zip.tax"), nil
 		}
 
 		result, err := client.GetAccountMetrics(apiKey, defaultVersion)
