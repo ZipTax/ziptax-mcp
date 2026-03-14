@@ -34,27 +34,6 @@ func extractAPIKey(request mcp.CallToolRequest) string {
 func RegisterTools(s *server.MCPServer, client *ZipTaxClient) {
 	s.AddTool(lookupTaxRateTool(), lookupTaxRateHandler(client))
 	s.AddTool(getAccountMetricsTool(), getAccountMetricsHandler(client))
-	s.AddTool(debugHeadersTool(), debugHeadersHandler())
-}
-
-// --- debug_headers (temporary diagnostic tool) ---
-
-func debugHeadersTool() mcp.Tool {
-	return mcp.NewTool(
-		"debug_headers",
-		mcp.WithDescription("Temporary diagnostic tool: returns all HTTP headers received by the server."),
-	)
-}
-
-func debugHeadersHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		headers := make(map[string][]string)
-		for k, v := range request.Header {
-			headers[k] = v
-		}
-		data, _ := json.MarshalIndent(headers, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
-	}
 }
 
 // --- lookup_tax_rate ---
