@@ -24,6 +24,7 @@ aws ecs update-service \
   --service "${ECS_SERVICE}" \
   --force-new-deployment \
   --region "${AWS_REGION}" \
+  --no-cli-pager \
   --query 'service.deployments[0].{Status:status,Running:runningCount,Desired:desiredCount}' \
   --output table
 
@@ -31,6 +32,7 @@ echo "==> Deploy initiated. Waiting for service stability..."
 aws ecs wait services-stable \
   --cluster "${ECS_CLUSTER}" \
   --services "${ECS_SERVICE}" \
-  --region "${AWS_REGION}"
+  --region "${AWS_REGION}" \
+  --no-cli-pager
 
 echo "==> Deploy complete! Service is stable."
