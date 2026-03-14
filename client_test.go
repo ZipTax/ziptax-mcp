@@ -41,7 +41,7 @@ func TestLookupTax(t *testing.T) {
 			t.Errorf("expected postalcode=90210, got %s", r.URL.Query().Get("postalcode"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(expected)
+		_ = json.NewEncoder(w).Encode(expected)
 	}))
 	defer server.Close()
 
@@ -66,7 +66,7 @@ func TestLookupTax(t *testing.T) {
 func TestLookupTaxError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("internal error"))
+		_, _ = w.Write([]byte("internal error"))
 	}))
 	defer server.Close()
 
@@ -93,7 +93,7 @@ func TestGetAccountMetrics(t *testing.T) {
 			t.Errorf("expected key=test-key, got %s", r.URL.Query().Get("key"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(expected)
+		_ = json.NewEncoder(w).Encode(expected)
 	}))
 	defer server.Close()
 
