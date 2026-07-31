@@ -10,11 +10,31 @@ https://mcp.zip-tax.com
 
 ## Authentication
 
-All requests require a valid ZipTax API key passed in the `X-API-KEY` HTTP header.
+All requests require a valid ZipTax API key sent as an HTTP header. Two header methods are supported:
 
-Get an API key at [platform.zip.tax](https://platform.zip.tax).
+```http
+X-API-KEY: your-api-key
+```
+
+```http
+Authorization: Bearer your-api-key
+```
+
+Get an API key at [platform.zip.tax](https://platform.zip.tax). Do not pass API keys in the URL; keys in URLs can end up in logs.
+
+## Example Use Cases
+
+Once connected, ask your AI agent things like:
+
+- "What's the sales tax rate for ZIP code 90210?"
+- "What's the combined sales tax rate at 200 Spectrum Center Dr, Irvine, CA?"
+- "What's the sales tax rate for Canadian postal code M5V 2T6 in Toronto, Ontario?"
+- "What was the sales tax rate in Nashville, TN (37203) in January of this year?"
+- "How many API requests do I have left on my ZipTax plan this month?"
 
 ## Tools
+
+Both tools are read-only lookups (annotated with `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true`).
 
 ### `lookup_tax_rate`
 
