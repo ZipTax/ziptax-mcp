@@ -15,9 +15,9 @@ import (
 
 // apiKeyFromQuery is HTTP middleware that copies the "key" URL query
 // parameter into the X-API-KEY request header when the header is not
-// already set. This lets MCP clients authenticate via URL:
-//
-//	https://mcp.zip-tax.com/?key=YOUR_API_KEY
+// already set. This is an undocumented fallback kept for backward
+// compatibility with existing clients; header-based authentication
+// (X-API-KEY or Authorization) is the supported method.
 func apiKeyFromQuery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if key := r.URL.Query().Get("key"); key != "" && r.Header.Get("X-API-KEY") == "" {
@@ -46,8 +46,8 @@ func main() {
 		server.WithToolCapabilities(false),
 		server.WithRecovery(),
 		server.WithInstructions("ZipTax MCP Server provides US and Canadian sales tax rate lookups. "+
-			"Authenticate by sending your ZipTax API key in the X-API-KEY HTTP header, "+
-			"the Authorization header, or as a ?key= URL parameter. "+
+			"Authenticate by sending your ZipTax API key in the X-API-KEY HTTP header "+
+			"or as a Bearer token in the Authorization header. "+
 			"Get an API key at https://platform.zip.tax"),
 	)
 
@@ -66,7 +66,7 @@ func main() {
 		server.WithStateLess(true),
 	)
 	// Wrap the MCP handler so that a ?key= URL parameter is promoted to
-	// the X-API-KEY header, giving clients an alternative auth method.
+	// the X-API-KEY header (backward-compatibility fallback only).
 	mux.Handle("/", apiKeyFromQuery(httpServer))
 
 	addr := fmt.Sprintf("0.0.0.0:%s", port)
