@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -55,6 +56,108 @@ func TestUserFacingTextDoesNotMentionURLKeyParameter(t *testing.T) {
 	}
 	if strings.Contains(errMissingAPIKey, "?key=") {
 		t.Error("missing-API-key error message mentions the ?key= URL parameter")
+	}
+}
+
+// The input schema must require a jurisdiction-accurate location: a
+// street address or a lat/lng pair. Postal-code-only lookups are
+// deliberately not advertised in the schema.
+func TestLookupTaxRateSchemaRequiresAddressOrLatLng(t *testing.T) {
+	data, err := json.Marshal(lookupTaxRateTool())
+	if err != nil {
+		t.Fatalf("marshaling tool: %v", err)
+	}
+
+	var decoded struct {
+		InputSchema struct {
+			Type       string                     `json:"type"`
+			Properties map[string]json.RawMessage `json:"properties"`
+			AnyOf      []struct {
+				Required []string `json:"required"`
+			} `json:"anyOf"`
+		} `json:"inputSchema"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshaling tool: %v", err)
+	}
+
+	schema := decoded.InputSchema
+	if schema.Type != "object" {
+		t.Errorf("inputSchema type = %q, want %q", schema.Type, "object")
+	}
+
+	if len(schema.AnyOf) != 2 {
+		t.Fatalf("anyOf has %d branches, want 2: %+v", len(schema.AnyOf), schema.AnyOf)
+	}
+	if got := schema.AnyOf[0].Required; len(got) != 1 || got[0] != "address" {
+		t.Errorf("anyOf[0].required = %v, want [address]", got)
+	}
+	if got := schema.AnyOf[1].Required; len(got) != 2 || got[0] != "lat" || got[1] != "lng" {
+		t.Errorf("anyOf[1].required = %v, want [lat lng]", got)
+	}
+
+	// The raw-schema conversion must not drop any parameters.
+	for _, name := range []string{
+		"postalcode", "address", "state", "city", "county",
+		"country_code", "lat", "lng", "historical", "adjustment",
+		"taxability_code", "sat_item_total", "format",
+	} {
+		if _, ok := schema.Properties[name]; !ok {
+			t.Errorf("inputSchema is missing property %q", name)
+		}
+	}
+}
+
+func TestLookupTaxRateHandlerLocationGuard(t *testing.T) {
+	handler := lookupTaxRateHandler(nil) // guard failures return before the client is used
+
+	tests := []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "no location", args: map[string]any{}},
+		{name: "lat without lng", args: map[string]any{"lat": "33.65"}},
+		{name: "lng without lat", args: map[string]any{"lng": "-117.74"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := mcp.CallToolRequest{Header: http.Header{"X-Api-Key": {"testkey"}}}
+			request.Params.Arguments = tt.args
+
+			result, err := handler(t.Context(), request)
+			if err != nil {
+				t.Fatalf("handler error: %v", err)
+			}
+			if !result.IsError {
+				t.Error("expected a location-guard error result")
+			}
+		})
+	}
+}
+
+// Postal-code-only lookups are not advertised in the schema but must
+// keep working for existing clients.
+func TestLookupTaxRateHandlerAcceptsPostalCodeOnly(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("postalcode"); got != "90210" {
+			t.Errorf("postalcode = %q, want %q", got, "90210")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer ts.Close()
+
+	handler := lookupTaxRateHandler(NewZipTaxClient(ts.URL))
+	request := mcp.CallToolRequest{Header: http.Header{"X-Api-Key": {"testkey"}}}
+	request.Params.Arguments = map[string]any{"postalcode": "90210"}
+
+	result, err := handler(t.Context(), request)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if result.IsError {
+		t.Fatal("expected success for a postalcode-only lookup")
 	}
 }
 
