@@ -7,11 +7,23 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
 )
+
+// serverInstructions is the client-facing usage text advertised by the
+// MCP server. It must only reference header-based authentication.
+const serverInstructions = "ZipTax MCP Server provides US and Canadian sales tax rate lookups. " +
+	"Authenticate by sending your ZipTax API key in the X-API-KEY HTTP header " +
+	"or as a Bearer token in the Authorization header. " +
+	"Get an API key at https://platform.zip.tax"
+
+// lastKeyParamWarnUnix throttles the ?key= deprecation warning to at most
+// once per minute, so unauthenticated request spam cannot flood the logs.
+var lastKeyParamWarnUnix atomic.Int64
 
 // apiKeyFromQuery is HTTP middleware that copies the "key" URL query
 // parameter into the X-API-KEY request header when the header is not
@@ -21,6 +33,10 @@ import (
 func apiKeyFromQuery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if key := r.URL.Query().Get("key"); key != "" && r.Header.Get("X-API-KEY") == "" {
+			now := time.Now().Unix()
+			if last := lastKeyParamWarnUnix.Load(); now-last >= 60 && lastKeyParamWarnUnix.CompareAndSwap(last, now) {
+				log.Printf("deprecated: API key received via ?key= URL parameter; migrate to the X-API-KEY or Authorization header")
+			}
 			r.Header.Set("X-API-KEY", key)
 		}
 		next.ServeHTTP(w, r)
@@ -45,10 +61,7 @@ func main() {
 		"1.0.0",
 		server.WithToolCapabilities(false),
 		server.WithRecovery(),
-		server.WithInstructions("ZipTax MCP Server provides US and Canadian sales tax rate lookups. "+
-			"Authenticate by sending your ZipTax API key in the X-API-KEY HTTP header "+
-			"or as a Bearer token in the Authorization header. "+
-			"Get an API key at https://platform.zip.tax"),
+		server.WithInstructions(serverInstructions),
 	)
 
 	RegisterTools(mcpServer, client)

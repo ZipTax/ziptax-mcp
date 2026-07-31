@@ -12,6 +12,10 @@ import (
 
 const defaultVersion = "v60"
 
+// errMissingAPIKey is returned when a tool call carries no API key. It
+// must only reference header-based authentication.
+const errMissingAPIKey = "Missing API key. Send it in the X-API-KEY header or as a Bearer token in the Authorization header. Get a key at https://platform.zip.tax"
+
 // extractAPIKey retrieves the ZipTax API key from (in priority order):
 //  1. The X-API-KEY request header (also populated by the legacy ?key=
 //     URL parameter fallback middleware)
@@ -21,7 +25,12 @@ func extractAPIKey(request mcp.CallToolRequest) string {
 		return key
 	}
 	if auth := request.Header.Get("Authorization"); auth != "" {
-		auth = strings.TrimPrefix(auth, "Bearer ")
+		// The auth scheme is case-insensitive per RFC 7235, so accept
+		// "Bearer", "bearer", "BEARER", etc.
+		const bearerPrefix = "Bearer "
+		if len(auth) >= len(bearerPrefix) && strings.EqualFold(auth[:len(bearerPrefix)], bearerPrefix) {
+			auth = auth[len(bearerPrefix):]
+		}
 		return strings.TrimSpace(auth)
 	}
 	return ""
@@ -95,7 +104,7 @@ func lookupTaxRateHandler(client *ZipTaxClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		apiKey := extractAPIKey(request)
 		if apiKey == "" {
-			return mcp.NewToolResultError("Missing API key. Send it in the X-API-KEY header or as a Bearer token in the Authorization header. Get a key at https://platform.zip.tax"), nil
+			return mcp.NewToolResultError(errMissingAPIKey), nil
 		}
 
 		params := make(map[string]string)
@@ -150,7 +159,7 @@ func getAccountMetricsHandler(client *ZipTaxClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		apiKey := extractAPIKey(request)
 		if apiKey == "" {
-			return mcp.NewToolResultError("Missing API key. Send it in the X-API-KEY header or as a Bearer token in the Authorization header. Get a key at https://platform.zip.tax"), nil
+			return mcp.NewToolResultError(errMissingAPIKey), nil
 		}
 
 		result, err := client.GetAccountMetrics(apiKey, defaultVersion)
