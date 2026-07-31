@@ -29,7 +29,7 @@ Once connected, ask your AI agent things like:
 - "What's the sales tax rate for ZIP code 90210?"
 - "What's the combined sales tax rate at 200 Spectrum Center Dr, Irvine, CA?"
 - "What's the sales tax rate for Canadian postal code M5V 2T6 in Toronto, Ontario?"
-- "What was the sales tax rate in Nashville, TN (37203) in December 2023?"
+- "What was the sales tax rate in Nashville, TN (37203) in January of this year?"
 - "How many API requests do I have left on my ZipTax plan this month?"
 
 ## Tools

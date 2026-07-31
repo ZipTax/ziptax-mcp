@@ -83,7 +83,7 @@ func lookupTaxRateTool() mcp.Tool {
 			mcp.Description("Longitude for coordinate-based lookup (requires geo-enabled account)"),
 		),
 		mcp.WithString("historical",
-			mcp.Description("Historical period in YYYYMM format (e.g., 202312 for December 2023)"),
+			mcp.Description("Historical period in YYYYMM format (e.g., 202601 for January 2026); lookback is limited to the past 12 months"),
 		),
 		mcp.WithString("adjustment",
 			mcp.Description("Set to 'auto' to enable state-specific unincorporated area adjustments"),
