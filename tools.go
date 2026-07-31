@@ -45,7 +45,7 @@ func RegisterTools(s *server.MCPServer, client *ZipTaxClient) {
 // --- lookup_tax_rate ---
 
 func lookupTaxRateTool() mcp.Tool {
-	return mcp.NewTool(
+	tool := mcp.NewTool(
 		"lookup_tax_rate",
 		mcp.WithTitleAnnotation("Look Up Sales Tax Rate"),
 		mcp.WithReadOnlyHintAnnotation(true),
@@ -54,7 +54,7 @@ func lookupTaxRateTool() mcp.Tool {
 		mcp.WithOpenWorldHintAnnotation(false),
 		mcp.WithDescription(
 			"Look up sales and use tax rates for a US or Canadian location. "+
-				"Provide a postal code at minimum, or a full address for more precise results. "+
+				"Provide a full street address for door-level accuracy, or a lat/lng pair for a geographic point lookup. "+
 				"Returns tax rates broken down by jurisdiction (state, county, city, district). "+
 				"Requires a valid ZipTax API key sent in the X-API-KEY header or Authorization header. "+
 				"Get a key at https://platform.zip.tax"),
@@ -98,6 +98,35 @@ func lookupTaxRateTool() mcp.Tool {
 			mcp.Description("Response format: 'json' (default) or 'xml'"),
 		),
 	)
+
+	// Callers must provide a jurisdiction-accurate location: a street
+	// address or a lat/lng pair. (Postal-code-only lookups still work
+	// for backward compatibility but are not advertised, since a postal
+	// code is not accurate to a single jurisdiction.) The structured
+	// ToolInputSchema type cannot express anyOf, so convert the built
+	// schema to a raw JSON schema and add the constraint there. mcp-go
+	// marshals RawInputSchema in place of InputSchema, and errors if
+	// both are set.
+	schemaJSON, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		panic(fmt.Sprintf("marshaling lookup_tax_rate input schema: %v", err))
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
+		panic(fmt.Sprintf("unmarshaling lookup_tax_rate input schema: %v", err))
+	}
+	schema["anyOf"] = []any{
+		map[string]any{"required": []string{"address"}},
+		map[string]any{"required": []string{"lat", "lng"}},
+	}
+	rawSchema, err := json.Marshal(schema)
+	if err != nil {
+		panic(fmt.Sprintf("marshaling lookup_tax_rate raw input schema: %v", err))
+	}
+	tool.InputSchema = mcp.ToolInputSchema{}
+	tool.RawInputSchema = rawSchema
+
+	return tool
 }
 
 func lookupTaxRateHandler(client *ZipTaxClient) server.ToolHandlerFunc {
@@ -119,8 +148,8 @@ func lookupTaxRateHandler(client *ZipTaxClient) server.ToolHandlerFunc {
 			}
 		}
 
-		if params["postalcode"] == "" && params["address"] == "" && params["lat"] == "" {
-			return mcp.NewToolResultError("At least one of postalcode, address, or lat/lng is required"), nil
+		if params["postalcode"] == "" && params["address"] == "" && (params["lat"] == "" || params["lng"] == "") {
+			return mcp.NewToolResultError("Provide a location: a full street address, or both lat and lng"), nil
 		}
 
 		result, err := client.LookupTax(apiKey, defaultVersion, params)
