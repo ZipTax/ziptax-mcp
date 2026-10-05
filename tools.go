@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -34,6 +35,16 @@ func extractAPIKey(request mcp.CallToolRequest) string {
 		return strings.TrimSpace(auth)
 	}
 	return ""
+}
+
+// formatResponse pretty-prints a JSON API response. Any other body, such
+// as the XML the API returns for format=xml, is returned unchanged.
+func formatResponse(body json.RawMessage) string {
+	formatted, err := json.MarshalIndent(body, "", "  ")
+	if err != nil {
+		return string(body)
+	}
+	return string(formatted)
 }
 
 // RegisterTools registers all MCP tools on the given server.
@@ -129,6 +140,34 @@ func lookupTaxRateTool() mcp.Tool {
 	return tool
 }
 
+// numericParams are the lookup_tax_rate parameters a client may send as
+// JSON numbers even though the schema declares strings. Identifiers such
+// as postalcode and taxability_code must be strings, since a number
+// drops leading zeros.
+var numericParams = map[string]bool{
+	"lat": true, "lng": true, "historical": true, "sat_item_total": true,
+}
+
+// stringArg returns the named tool argument as a string, or "" when it is
+// absent or null. A number is converted for numericParams; any other
+// non-string value is an error rather than being silently dropped.
+func stringArg(args map[string]any, name string) (string, error) {
+	switch v := args[name].(type) {
+	case nil:
+		return "", nil
+	case string:
+		return v, nil
+	case float64:
+		if numericParams[name] {
+			return strconv.FormatFloat(v, 'f', -1, 64), nil
+		}
+	}
+	if numericParams[name] {
+		return "", fmt.Errorf("%s must be a string or number", name)
+	}
+	return "", fmt.Errorf("%s must be a string", name)
+}
+
 func lookupTaxRateHandler(client *ZipTaxClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		apiKey := extractAPIKey(request)
@@ -136,6 +175,7 @@ func lookupTaxRateHandler(client *ZipTaxClient) server.ToolHandlerFunc {
 			return mcp.NewToolResultError(errMissingAPIKey), nil
 		}
 
+		args := request.GetArguments()
 		params := make(map[string]string)
 		paramNames := []string{
 			"postalcode", "address", "state", "city", "county",
@@ -143,7 +183,11 @@ func lookupTaxRateHandler(client *ZipTaxClient) server.ToolHandlerFunc {
 			"taxability_code", "sat_item_total", "format",
 		}
 		for _, name := range paramNames {
-			if v := request.GetString(name, ""); v != "" {
+			v, err := stringArg(args, name)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if v != "" {
 				params[name] = v
 			}
 		}
@@ -157,12 +201,7 @@ func lookupTaxRateHandler(client *ZipTaxClient) server.ToolHandlerFunc {
 			return mcp.NewToolResultError(fmt.Sprintf("ZipTax API error: %v", err)), nil
 		}
 
-		formatted, err := json.MarshalIndent(json.RawMessage(result), "", "  ")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to format response: %v", err)), nil
-		}
-
-		return mcp.NewToolResultText(string(formatted)), nil
+		return mcp.NewToolResultText(formatResponse(result)), nil
 	}
 }
 
@@ -196,11 +235,6 @@ func getAccountMetricsHandler(client *ZipTaxClient) server.ToolHandlerFunc {
 			return mcp.NewToolResultError(fmt.Sprintf("ZipTax API error: %v", err)), nil
 		}
 
-		formatted, err := json.MarshalIndent(json.RawMessage(result), "", "  ")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to format response: %v", err)), nil
-		}
-
-		return mcp.NewToolResultText(string(formatted)), nil
+		return mcp.NewToolResultText(formatResponse(result)), nil
 	}
 }
