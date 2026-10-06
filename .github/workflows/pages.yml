@@ -27,6 +27,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing after checkout runs git; the job only reads two files.
+          persist-credentials: false
 
       - name: Assemble the site from README.md and LICENSE
         run: |
