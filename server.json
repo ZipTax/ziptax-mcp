@@ -3,8 +3,8 @@
   "name": "tax.zip/ziptax",
   "title": "Ziptax Sales Tax API",
   "description": "Real-time US and Canadian sales and use tax rates by address or geo coordinates.",
-  "version": "1.0.4",
-  "websiteUrl": "https://docs.zip.tax/v-6-0/guides/agents-and-llms/mcp-server",
+  "version": "1.0.5",
+  "websiteUrl": "https://docs.zip.tax/guides/agents-and-llms/mcp-server",
   "repository": {
     "url": "https://github.com/ZipTax/ziptax-mcp",
     "source": "github"
