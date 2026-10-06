@@ -1,0 +1,79 @@
+name: Pages
+
+# Publishes README.md as the public documentation site at https://mcp.zip.tax/
+# while the repository stays internal. Only README.md and LICENSE are copied
+# into the site; nothing else in the repo is published.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - README.md
+      - LICENSE
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing after checkout runs git; the job only reads two files.
+          persist-credentials: false
+
+      - name: Assemble the site from README.md and LICENSE
+        run: |
+          mkdir site
+          {
+            printf -- '---\ntitle: Ziptax MCP Server\n---\n\n'
+            cat README.md
+          } > site/index.md
+          {
+            printf -- '---\ntitle: License\npermalink: /LICENSE/\n---\n\n```text\n'
+            cat LICENSE
+            printf -- '```\n'
+          } > site/license.md
+          # url and baseurl are fixed here so the output does not depend on the
+          # repo's Pages settings at build time (jekyll-github-metadata would
+          # otherwise derive them from the Pages API and could bake in
+          # ziptax.github.io/ziptax-mcp or http://).
+          cat > site/_config.yml <<'EOF'
+          title: Ziptax MCP Server
+          description: HTTP MCP server for real-time US and Canadian sales tax rates from the Ziptax API
+          theme: jekyll-theme-primer
+          url: https://mcp.zip.tax
+          baseurl: ""
+          EOF
+
+      - name: Setup Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Build with Jekyll
+        uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1.0.13
+        with:
+          source: ./site
+          destination: ./_site
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

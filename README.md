@@ -313,6 +313,7 @@ CI/CD is handled by GitHub Actions:
 1. **test.yml** - Runs on PRs and pushes: linting (`golangci-lint`) and tests (`go test`)
 2. **build.yml** - Runs on main: builds Docker image and pushes to ECR
 3. **deploy.yml** - Runs after build: updates the ECS service with the new image
+4. **pages.yml** - Runs on main when this README, the LICENSE, or the workflow changes, or on manual dispatch: publishes the README as the documentation site at [mcp.zip.tax](https://mcp.zip.tax/)
 
 ### Initial Setup
 
