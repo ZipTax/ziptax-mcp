@@ -58,7 +58,7 @@ func main() {
 
 	mcpServer := server.NewMCPServer(
 		"ZipTax Sales Tax API",
-		"1.0.3",
+		"1.0.4",
 		server.WithToolCapabilities(false),
 		server.WithRecovery(),
 		server.WithInstructions(serverInstructions),
