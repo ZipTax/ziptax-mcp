@@ -315,6 +315,8 @@ CI/CD is handled by GitHub Actions:
 3. **deploy.yml** - Runs after build: updates the ECS service with the new image
 4. **pages.yml** - Runs on main when this README, the LICENSE, or the workflow changes, or on manual dispatch: publishes the README as the documentation site at [mcp.zip.tax](https://mcp.zip.tax/)
 
+`build.yml` and `deploy.yml` authenticate to AWS by assuming an IAM role through GitHub OIDC; no workflow uses static AWS keys. The role is defined in `ziptax-terraform` (`github_oidc.tf`) and trusts only this repository's `main` branch. Its ARN is the `AWS_DEPLOY_ROLE_ARN` repository variable.
+
 ### Initial Setup
 
 1. Deploy the CloudFormation stack:
