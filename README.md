@@ -313,6 +313,8 @@ CI/CD is handled by GitHub Actions:
 1. **test.yml** - Runs on PRs and pushes: linting (`golangci-lint`) and tests (`go test`)
 2. **build.yml** - Runs on main: builds Docker image and pushes to ECR
 3. **deploy.yml** - Runs after build: updates the ECS service with the new image
+
+`build.yml` and `deploy.yml` authenticate to AWS by assuming an IAM role through GitHub OIDC; there are no static AWS keys in this repo. The role is defined in `ziptax-terraform` (`github_oidc.tf`) and trusts only this repository's `main` branch. Its ARN is the `AWS_DEPLOY_ROLE_ARN` repository variable.
 4. **pages.yml** - Runs on main when this README, the LICENSE, or the workflow changes, or on manual dispatch: publishes the README as the documentation site at [mcp.zip.tax](https://mcp.zip.tax/)
 
 ### Initial Setup
