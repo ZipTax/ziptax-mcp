@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -159,5 +161,46 @@ func TestTruncatedResponseKeepsStatus(t *testing.T) {
 				t.Errorf("error = %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+// A transport failure's message names only the kind of failure, and the
+// *url.Error that quotes the request URL is not kept, so nothing that
+// unwraps the error reaches the key or the address either.
+func TestAPITransportErrorDropsTheRequestURL(t *testing.T) {
+	const reqURL = "https://api.zip-tax.com/request/v60?address=123+Main+St&key=secret-test-key"
+
+	tests := []struct {
+		name  string
+		cause error
+		want  string
+	}{
+		{name: "timeout", cause: timeoutError{}, want: "API request failed: timeout"},
+		{name: "connection refused", cause: errors.New("dial tcp 127.0.0.1:1: connect: connection refused"), want: "API request failed: connection failed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := newAPITransportError(&url.Error{Op: "Get", URL: reqURL, Err: tt.cause})
+			if got := err.Error(); got != tt.want {
+				t.Errorf("Error() = %q, want %q", got, tt.want)
+			}
+			var urlErr *url.Error
+			if errors.As(err, &urlErr) {
+				t.Error("errors.As found the *url.Error, which quotes the request URL")
+			}
+			for e := error(err); e != nil; e = errors.Unwrap(e) {
+				if text := e.Error(); strings.Contains(text, "secret-test-key") || strings.Contains(text, "Main") {
+					t.Errorf("error chain carries the request: %q", text)
+				}
+			}
+		})
+	}
+
+	// http.Client.Do documents that its errors are always *url.Error; if
+	// one ever is not, the message stays fixed regardless.
+	err := newAPITransportError(errors.New(`Get "` + reqURL + `": EOF`))
+	if got, want := err.Error(), "API request failed: connection failed"; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
 	}
 }

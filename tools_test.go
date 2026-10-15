@@ -371,8 +371,8 @@ func TestExtractAPIKey(t *testing.T) {
 
 // Every tool call writes exactly one usage log line carrying the key-hash
 // prefix and never the raw key or its full hash, on every path: success,
-// upstream errors whose bodies echo the key, an unreachable API (whose Go
-// error text includes the request URL and so the key), invalid arguments,
+// upstream errors whose bodies echo the key, an unreachable API (net/http's
+// error for it quotes the request URL, and so the key), invalid arguments,
 // and a missing key. The process's standard logger is checked too.
 func TestToolCallsLogUsageWithoutLeakingTheKey(t *testing.T) {
 	const apiKey = "zt-usage-log-test-key-4b1d"
@@ -587,7 +587,11 @@ func TestToolErrorsDoNotEchoTheUpstreamRequest(t *testing.T) {
 			}
 
 			client := NewZipTaxClient(ts.URL)
-			client.httpClient.Timeout = 50 * time.Millisecond
+			if tt.stall {
+				// Only here: a slow dial to the closed port must not turn
+				// an unreachable case into a timeout.
+				client.httpClient.Timeout = 50 * time.Millisecond
+			}
 
 			request := mcp.CallToolRequest{Header: http.Header{"X-Api-Key": {apiKey}}}
 			request.Params.Arguments = tt.args
