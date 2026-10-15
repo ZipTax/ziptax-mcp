@@ -75,7 +75,12 @@ func TestLookupTaxError(t *testing.T) {
 		"postalcode": "90210",
 	})
 	if err == nil {
-		t.Error("expected error for 500 response")
+		t.Fatal("expected error for 500 response")
+	}
+	// Tool error results show this text to MCP clients, so its format
+	// must not change.
+	if got, want := err.Error(), "API returned status 500: internal error"; got != want {
+		t.Errorf("error = %q, want %q", got, want)
 	}
 }
 

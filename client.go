@@ -15,6 +15,18 @@ type ZipTaxClient struct {
 	httpClient *http.Client
 }
 
+// APIStatusError is returned when the ZipTax API answers with a status
+// other than 200. Its message reaches MCP clients in tool error results,
+// so its format is kept stable.
+type APIStatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIStatusError) Error() string {
+	return fmt.Sprintf("API returned status %d: %s", e.StatusCode, e.Body)
+}
+
 // NewZipTaxClient creates a new ZipTax API client.
 func NewZipTaxClient(baseURL string) *ZipTaxClient {
 	return &ZipTaxClient{
@@ -54,7 +66,7 @@ func (c *ZipTaxClient) LookupTax(apiKey, version string, params map[string]strin
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, &APIStatusError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	return json.RawMessage(body), nil
@@ -83,7 +95,7 @@ func (c *ZipTaxClient) GetAccountMetrics(apiKey, version string) (json.RawMessag
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, &APIStatusError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	return json.RawMessage(body), nil
