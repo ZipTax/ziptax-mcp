@@ -43,6 +43,25 @@ func apiKeyFromQuery(next http.Handler) http.Handler {
 	})
 }
 
+// newMCPServer builds the MCP server with its tools registered and every
+// request counted by method in methods.
+func newMCPServer(client *ZipTaxClient, methods *methodCounts) *server.MCPServer {
+	hooks := &server.Hooks{}
+	hooks.AddBeforeAny(methods.count)
+
+	mcpServer := server.NewMCPServer(
+		"ZipTax Sales Tax API",
+		"1.0.5",
+		server.WithToolCapabilities(false),
+		server.WithRecovery(),
+		server.WithInstructions(serverInstructions),
+		server.WithHooks(hooks),
+	)
+
+	RegisterTools(mcpServer, client)
+	return mcpServer
+}
+
 func main() {
 	apiBaseURL := os.Getenv("ZIPTAX_API_BASE_URL")
 	if apiBaseURL == "" {
@@ -56,15 +75,13 @@ func main() {
 
 	client := NewZipTaxClient(apiBaseURL)
 
-	mcpServer := server.NewMCPServer(
-		"ZipTax Sales Tax API",
-		"1.0.5",
-		server.WithToolCapabilities(false),
-		server.WithRecovery(),
-		server.WithInstructions(serverInstructions),
-	)
-
-	RegisterTools(mcpServer, client)
+	methods := &methodCounts{}
+	mcpServer := newMCPServer(client, methods)
+	go func() {
+		for range time.Tick(methodCountsInterval) {
+			methods.flush()
+		}
+	}()
 
 	mux := http.NewServeMux()
 
@@ -107,7 +124,10 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	err := srv.Shutdown(ctx)
+	// Log the final partial interval's method counts before exiting.
+	methods.flush()
+	if err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
 
