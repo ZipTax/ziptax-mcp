@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -166,8 +167,8 @@ func TestMethodCountsLogSetupTraffic(t *testing.T) {
 	methods.flush()
 
 	want := []struct {
-		method string
-		count  float64
+		method   string
+		requests float64
 	}{
 		{"initialize", 1},
 		{"tools/call", 1},
@@ -179,8 +180,8 @@ func TestMethodCountsLogSetupTraffic(t *testing.T) {
 	}
 	for i, w := range want {
 		line := lines[i]
-		if line["msg"] != "mcp_method_count" || line["method"] != w.method || line["count"] != w.count {
-			t.Errorf("line %d = %v, want msg=mcp_method_count method=%s count=%v", i, line, w.method, w.count)
+		if line["msg"] != "mcp_method_count" || line["method"] != w.method || line["requests"] != w.requests {
+			t.Errorf("line %d = %v, want msg=mcp_method_count method=%s requests=%v", i, line, w.method, w.requests)
 		}
 	}
 
@@ -188,5 +189,48 @@ func TestMethodCountsLogSetupTraffic(t *testing.T) {
 	methods.flush()
 	if logs.Len() != 0 {
 		t.Errorf("flush with no new requests logged: %s", logs)
+	}
+}
+
+// Concurrent counting and flushing must neither race nor lose requests.
+func TestMethodCountsConcurrentCountAndFlush(t *testing.T) {
+	logs := captureUsageLog(t)
+	methods := &methodCounts{}
+
+	const goroutines, perGoroutine = 8, 250
+	var wg sync.WaitGroup
+	for range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range perGoroutine {
+				methods.count(t.Context(), nil, mcp.MethodToolsList, nil)
+			}
+		}()
+	}
+	stop := make(chan struct{})
+	flushed := make(chan struct{})
+	go func() {
+		defer close(flushed)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				methods.flush()
+			}
+		}
+	}()
+	wg.Wait()
+	close(stop)
+	<-flushed
+	methods.flush()
+
+	var total float64
+	for _, line := range usageLines(t, logs) {
+		total += line["requests"].(float64)
+	}
+	if want := float64(goroutines * perGoroutine); total != want {
+		t.Errorf("flushed %v requests in total, want %v", total, want)
 	}
 }

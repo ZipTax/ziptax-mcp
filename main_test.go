@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -92,4 +93,66 @@ func TestAPIKeyFromQuery(t *testing.T) {
 			t.Errorf("deprecation warning logged %d times, want 1", got)
 		}
 	})
+}
+
+// A tool call sent through the production HTTP handler with the legacy
+// ?key= parameter is logged with the key's hash prefix, and neither the
+// usage log nor the standard logger (which mcp-go also writes to) carries
+// the key or its full hash.
+func TestKeyParamToolCallIsLoggedWithoutKeyMaterial(t *testing.T) {
+	const apiKey = "zt-usage-log-query-key-9e2c"
+	stdLogs := captureLog(t)
+	logs := captureUsageLog(t)
+
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("key"); got != apiKey {
+			t.Errorf("API received key %q, want the ?key= value", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"requestCount":1}`))
+	}))
+	defer api.Close()
+
+	mcpSrv := httptest.NewServer(newMCPHandler(newMCPServer(NewZipTaxClient(api.URL), &methodCounts{})))
+	defer mcpSrv.Close()
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account_metrics","arguments":{}}}`
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, mcpSrv.URL+"/?key="+apiKey, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("building request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("calling MCP server: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("reading response: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(respBody), "requestCount") {
+		t.Fatalf("response %d %s, want 200 with the metrics result", resp.StatusCode, respBody)
+	}
+
+	lines := usageLines(t, logs)
+	if len(lines) != 1 {
+		t.Fatalf("got %d usage log lines, want 1: %s", len(lines), logs)
+	}
+	for field, want := range map[string]any{
+		"msg":      "mcp_tool_call",
+		"tool":     "get_account_metrics",
+		"key_hash": keyHashPrefix(apiKey),
+		"outcome":  "ok",
+	} {
+		if lines[0][field] != want {
+			t.Errorf("%s = %v, want %v", field, lines[0][field], want)
+		}
+	}
+	if !strings.Contains(stdLogs.String(), "deprecated") {
+		t.Errorf("want the ?key= deprecation warning in the standard log, got: %s", stdLogs)
+	}
+	assertNoKeyMaterial(t, logs.String(), apiKey)
+	assertNoKeyMaterial(t, stdLogs.String(), apiKey)
 }

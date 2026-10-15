@@ -146,7 +146,7 @@ func (m *methodCounts) flush() {
 	for _, method := range slices.Sorted(maps.Keys(counts)) {
 		usageLogger.LogAttrs(context.Background(), slog.LevelInfo, "mcp_method_count",
 			slog.String("method", method),
-			slog.Int64("count", counts[method]),
+			slog.Int64("requests", counts[method]),
 		)
 	}
 }

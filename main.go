@@ -62,6 +62,16 @@ func newMCPServer(client *ZipTaxClient, methods *methodCounts) *server.MCPServer
 	return mcpServer
 }
 
+// newMCPHandler serves mcpServer over stateless Streamable HTTP. A ?key=
+// URL parameter is promoted to the X-API-KEY header
+// (backward-compatibility fallback only).
+func newMCPHandler(mcpServer *server.MCPServer) http.Handler {
+	return apiKeyFromQuery(server.NewStreamableHTTPServer(mcpServer,
+		server.WithEndpointPath("/"),
+		server.WithStateLess(true),
+	))
+}
+
 func main() {
 	apiBaseURL := os.Getenv("ZIPTAX_API_BASE_URL")
 	if apiBaseURL == "" {
@@ -91,13 +101,7 @@ func main() {
 		_, _ = fmt.Fprint(w, `{"status":"ok"}`)
 	})
 
-	httpServer := server.NewStreamableHTTPServer(mcpServer,
-		server.WithEndpointPath("/"),
-		server.WithStateLess(true),
-	)
-	// Wrap the MCP handler so that a ?key= URL parameter is promoted to
-	// the X-API-KEY header (backward-compatibility fallback only).
-	mux.Handle("/", apiKeyFromQuery(httpServer))
+	mux.Handle("/", newMCPHandler(mcpServer))
 
 	addr := fmt.Sprintf("0.0.0.0:%s", port)
 	srv := &http.Server{
@@ -120,12 +124,15 @@ func main() {
 
 	<-done
 	log.Println("Shutting down server...")
+	// Flush method counts before Shutdown, which can wait out its full
+	// timeout on an open stream and outlast ECS's stop timeout. The
+	// flush after it catches requests that finish while draining.
+	methods.flush()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	err := srv.Shutdown(ctx)
-	// Log the final partial interval's method counts before exiting.
 	methods.flush()
 	if err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
