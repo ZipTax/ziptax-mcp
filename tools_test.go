@@ -387,6 +387,13 @@ func TestToolCallsLogUsageWithoutLeakingTheKey(t *testing.T) {
 			_, _ = w.Write([]byte(`{"error":"invalid key ` + r.URL.Query().Get("key") + `"}`))
 		}
 	}
+	truncated := func(status int) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Length", "100")
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte("short"))
+		}
+	}
 	keyHeader := http.Header{"X-Api-Key": {apiKey}}
 
 	tests := []struct {
@@ -406,6 +413,8 @@ func TestToolCallsLogUsageWithoutLeakingTheKey(t *testing.T) {
 			args: map[string]any{"lat": "33.65", "lng": "-117.74"}, upstream: ok, wantOutcome: "ok", wantStatus: 200},
 		{name: "lookup upstream 401 echoing the key", handler: lookupTaxRateHandler, tool: "lookup_tax_rate", header: keyHeader,
 			args: map[string]any{"postalcode": "90210"}, upstream: echoKey(http.StatusUnauthorized), wantOutcome: "upstream_status", wantStatus: 401},
+		{name: "lookup upstream 503 with truncated body", handler: lookupTaxRateHandler, tool: "lookup_tax_rate", header: keyHeader,
+			args: map[string]any{"postalcode": "90210"}, upstream: truncated(http.StatusServiceUnavailable), wantOutcome: "upstream_error", wantStatus: 503},
 		{name: "lookup upstream unreachable", handler: lookupTaxRateHandler, tool: "lookup_tax_rate", header: keyHeader,
 			args: map[string]any{"postalcode": "90210"}, unreachable: true, wantOutcome: "upstream_error", wantStatus: 0},
 		{name: "lookup invalid argument type", handler: lookupTaxRateHandler, tool: "lookup_tax_rate", header: keyHeader,
@@ -418,6 +427,8 @@ func TestToolCallsLogUsageWithoutLeakingTheKey(t *testing.T) {
 			upstream: ok, wantOutcome: "ok", wantStatus: 200},
 		{name: "metrics upstream 403 echoing the key", handler: getAccountMetricsHandler, tool: "get_account_metrics", header: keyHeader,
 			upstream: echoKey(http.StatusForbidden), wantOutcome: "upstream_status", wantStatus: 403},
+		{name: "metrics upstream 200 with truncated body", handler: getAccountMetricsHandler, tool: "get_account_metrics", header: keyHeader,
+			upstream: truncated(http.StatusOK), wantOutcome: "upstream_error", wantStatus: 200},
 		{name: "metrics missing key", handler: getAccountMetricsHandler, tool: "get_account_metrics", header: http.Header{},
 			wantOutcome: "missing_key", wantStatus: 0},
 	}

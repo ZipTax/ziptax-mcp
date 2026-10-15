@@ -45,17 +45,17 @@ const (
 	outcomeOK              = "ok"
 	outcomeMissingKey      = "missing_key"
 	outcomeInvalidArgs     = "invalid_arguments"
-	outcomeUpstreamStatus  = "upstream_status" // the API answered with a status other than 200
-	outcomeUpstreamTimeout = "upstream_timeout"
-	outcomeUpstreamError   = "upstream_error" // any other failure reaching or reading the API
-	outcomeInternalError   = "internal_error" // the tool handler panicked
+	outcomeUpstreamStatus  = "upstream_status"  // the API answered with a status other than 200
+	outcomeUpstreamTimeout = "upstream_timeout" // reaching the API or reading its response timed out
+	outcomeUpstreamError   = "upstream_error"   // any other failure reaching the API or reading its response
+	outcomeInternalError   = "internal_error"   // the tool handler panicked
 )
 
 // callOutcome is how a tool call ended, for its usage log line.
 type callOutcome struct {
 	class string
 	// upstreamStatus is the ZipTax API's HTTP status, or 0 when the API
-	// was not called or did not answer.
+	// was not called or no response arrived.
 	upstreamStatus int
 }
 
@@ -68,11 +68,18 @@ func upstreamOutcome(err error) callOutcome {
 	if errors.As(err, &statusErr) {
 		return callOutcome{class: outcomeUpstreamStatus, upstreamStatus: statusErr.StatusCode}
 	}
+
+	outcome := callOutcome{class: outcomeUpstreamError}
+	// A response whose body could not be read still has its status.
+	var readErr *ResponseReadError
+	if errors.As(err, &readErr) {
+		outcome.upstreamStatus = readErr.StatusCode
+	}
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
-		return callOutcome{class: outcomeUpstreamTimeout}
+		outcome.class = outcomeUpstreamTimeout
 	}
-	return callOutcome{class: outcomeUpstreamError}
+	return outcome
 }
 
 // toolBody is the part of a tool handler that runs once the caller's API

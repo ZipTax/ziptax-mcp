@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -97,7 +98,9 @@ func TestUpstreamOutcome(t *testing.T) {
 		{name: "non-200 status", err: &APIStatusError{StatusCode: http.StatusUnauthorized, Body: "bad key"}, want: callOutcome{class: outcomeUpstreamStatus, upstreamStatus: http.StatusUnauthorized}},
 		{name: "wrapped non-200 status", err: fmt.Errorf("lookup: %w", &APIStatusError{StatusCode: http.StatusTooManyRequests}), want: callOutcome{class: outcomeUpstreamStatus, upstreamStatus: http.StatusTooManyRequests}},
 		{name: "timeout", err: fmt.Errorf("API request failed: %w", timeoutError{}), want: callOutcome{class: outcomeUpstreamTimeout}},
-		{name: "other failure", err: errors.New("reading response body: unexpected EOF"), want: callOutcome{class: outcomeUpstreamError}},
+		{name: "connection failure", err: fmt.Errorf("API request failed: %w", errors.New("connection refused")), want: callOutcome{class: outcomeUpstreamError}},
+		{name: "truncated body keeps the status", err: &ResponseReadError{StatusCode: http.StatusServiceUnavailable, Err: io.ErrUnexpectedEOF}, want: callOutcome{class: outcomeUpstreamError, upstreamStatus: http.StatusServiceUnavailable}},
+		{name: "body read timeout keeps the status", err: &ResponseReadError{StatusCode: http.StatusOK, Err: timeoutError{}}, want: callOutcome{class: outcomeUpstreamTimeout, upstreamStatus: http.StatusOK}},
 	}
 
 	for _, tt := range tests {

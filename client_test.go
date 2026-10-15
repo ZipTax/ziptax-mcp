@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -115,5 +117,47 @@ func TestGetAccountMetrics(t *testing.T) {
 
 	if parsed["requestCount"] != float64(42) {
 		t.Errorf("expected requestCount=42, got %v", parsed["requestCount"])
+	}
+}
+
+// A response whose body is cut short still reports the status the API
+// answered with, so the usage log can record it.
+func TestTruncatedResponseKeepsStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("short"))
+	}))
+	defer server.Close()
+	client := NewZipTaxClient(server.URL)
+
+	calls := map[string]func() error{
+		"LookupTax": func() error {
+			_, err := client.LookupTax("test-key", "v60", map[string]string{"postalcode": "90210"})
+			return err
+		},
+		"GetAccountMetrics": func() error {
+			_, err := client.GetAccountMetrics("test-key", "v60")
+			return err
+		},
+	}
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			err := call()
+			var readErr *ResponseReadError
+			if !errors.As(err, &readErr) {
+				t.Fatalf("error = %v, want a *ResponseReadError", err)
+			}
+			if readErr.StatusCode != http.StatusServiceUnavailable {
+				t.Errorf("StatusCode = %d, want %d", readErr.StatusCode, http.StatusServiceUnavailable)
+			}
+			if !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Errorf("error = %v, want it to wrap io.ErrUnexpectedEOF", err)
+			}
+			// Tool error results show this text to MCP clients.
+			if got, want := err.Error(), "reading response body: unexpected EOF"; got != want {
+				t.Errorf("error = %q, want %q", got, want)
+			}
+		})
 	}
 }
