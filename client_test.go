@@ -2,8 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -75,7 +79,12 @@ func TestLookupTaxError(t *testing.T) {
 		"postalcode": "90210",
 	})
 	if err == nil {
-		t.Error("expected error for 500 response")
+		t.Fatal("expected error for 500 response")
+	}
+	// Tool error results show this text to MCP clients, so its format
+	// must not change.
+	if got, want := err.Error(), "API returned status 500: internal error"; got != want {
+		t.Errorf("error = %q, want %q", got, want)
 	}
 }
 
@@ -110,5 +119,88 @@ func TestGetAccountMetrics(t *testing.T) {
 
 	if parsed["requestCount"] != float64(42) {
 		t.Errorf("expected requestCount=42, got %v", parsed["requestCount"])
+	}
+}
+
+// A response whose body is cut short still reports the status the API
+// answered with, so the usage log can record it.
+func TestTruncatedResponseKeepsStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("short"))
+	}))
+	defer server.Close()
+	client := NewZipTaxClient(server.URL)
+
+	calls := map[string]func() error{
+		"LookupTax": func() error {
+			_, err := client.LookupTax("test-key", "v60", map[string]string{"postalcode": "90210"})
+			return err
+		},
+		"GetAccountMetrics": func() error {
+			_, err := client.GetAccountMetrics("test-key", "v60")
+			return err
+		},
+	}
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			err := call()
+			var readErr *ResponseReadError
+			if !errors.As(err, &readErr) {
+				t.Fatalf("error = %v, want a *ResponseReadError", err)
+			}
+			if readErr.StatusCode != http.StatusServiceUnavailable {
+				t.Errorf("StatusCode = %d, want %d", readErr.StatusCode, http.StatusServiceUnavailable)
+			}
+			if !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Errorf("error = %v, want it to wrap io.ErrUnexpectedEOF", err)
+			}
+			// Tool error results show this text to MCP clients.
+			if got, want := err.Error(), "reading response body: unexpected EOF"; got != want {
+				t.Errorf("error = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// A transport failure's message names only the kind of failure, and the
+// *url.Error that quotes the request URL is not kept, so nothing that
+// unwraps the error reaches the key or the address either.
+func TestAPITransportErrorDropsTheRequestURL(t *testing.T) {
+	const reqURL = "https://api.zip-tax.com/request/v60?address=123+Main+St&key=secret-test-key"
+
+	tests := []struct {
+		name  string
+		cause error
+		want  string
+	}{
+		{name: "timeout", cause: timeoutError{}, want: "API request failed: timeout"},
+		{name: "connection refused", cause: errors.New("dial tcp 127.0.0.1:1: connect: connection refused"), want: "API request failed: connection failed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := newAPITransportError(&url.Error{Op: "Get", URL: reqURL, Err: tt.cause})
+			if got := err.Error(); got != tt.want {
+				t.Errorf("Error() = %q, want %q", got, tt.want)
+			}
+			var urlErr *url.Error
+			if errors.As(err, &urlErr) {
+				t.Error("errors.As found the *url.Error, which quotes the request URL")
+			}
+			for e := error(err); e != nil; e = errors.Unwrap(e) {
+				if text := e.Error(); strings.Contains(text, "secret-test-key") || strings.Contains(text, "Main") {
+					t.Errorf("error chain carries the request: %q", text)
+				}
+			}
+		})
+	}
+
+	// http.Client.Do documents that its errors are always *url.Error; if
+	// one ever is not, the message stays fixed regardless.
+	err := newAPITransportError(errors.New(`Get "` + reqURL + `": EOF`))
+	if got, want := err.Error(), "API request failed: connection failed"; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
 	}
 }
