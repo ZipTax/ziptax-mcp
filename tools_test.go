@@ -2,12 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 )
 
 func assertReadOnlyAnnotations(t *testing.T, tool mcp.Tool, wantTitle string) {
@@ -362,4 +366,176 @@ func TestExtractAPIKey(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Every tool call writes exactly one usage log line carrying the key-hash
+// prefix and never the raw key or its full hash, on every path: success,
+// upstream errors whose bodies echo the key, an unreachable API (whose Go
+// error text includes the request URL and so the key), invalid arguments,
+// and a missing key. The process's standard logger is checked too.
+func TestToolCallsLogUsageWithoutLeakingTheKey(t *testing.T) {
+	const apiKey = "zt-usage-log-test-key-4b1d"
+	wantHash := keyHashPrefix(apiKey)
+
+	ok := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}
+	echoKey := func(status int) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(`{"error":"invalid key ` + r.URL.Query().Get("key") + `"}`))
+		}
+	}
+	truncated := func(status int) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Length", "100")
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte("short"))
+		}
+	}
+	keyHeader := http.Header{"X-Api-Key": {apiKey}}
+
+	tests := []struct {
+		name        string
+		handler     func(*ZipTaxClient) server.ToolHandlerFunc
+		tool        string
+		header      http.Header
+		args        map[string]any
+		upstream    http.HandlerFunc // nil: the API must not be called
+		unreachable bool
+		wantOutcome string
+		wantStatus  float64
+	}{
+		{name: "lookup success via X-API-KEY", handler: lookupTaxRateHandler, tool: "lookup_tax_rate", header: keyHeader,
+			args: map[string]any{"address": "200 Spectrum Center Dr, Irvine, CA"}, upstream: ok, wantOutcome: "ok", wantStatus: 200},
+		{name: "lookup success via Bearer token", handler: lookupTaxRateHandler, tool: "lookup_tax_rate", header: http.Header{"Authorization": {"Bearer " + apiKey}},
+			args: map[string]any{"lat": "33.65", "lng": "-117.74"}, upstream: ok, wantOutcome: "ok", wantStatus: 200},
+		{name: "lookup upstream 401 echoing the key", handler: lookupTaxRateHandler, tool: "lookup_tax_rate", header: keyHeader,
+			args: map[string]any{"postalcode": "90210"}, upstream: echoKey(http.StatusUnauthorized), wantOutcome: "upstream_status", wantStatus: 401},
+		{name: "lookup upstream 503 with truncated body", handler: lookupTaxRateHandler, tool: "lookup_tax_rate", header: keyHeader,
+			args: map[string]any{"postalcode": "90210"}, upstream: truncated(http.StatusServiceUnavailable), wantOutcome: "upstream_error", wantStatus: 503},
+		{name: "lookup upstream unreachable", handler: lookupTaxRateHandler, tool: "lookup_tax_rate", header: keyHeader,
+			args: map[string]any{"postalcode": "90210"}, unreachable: true, wantOutcome: "upstream_error", wantStatus: 0},
+		{name: "lookup invalid argument type", handler: lookupTaxRateHandler, tool: "lookup_tax_rate", header: keyHeader,
+			args: map[string]any{"postalcode": float64(2134)}, wantOutcome: "invalid_arguments", wantStatus: 0},
+		{name: "lookup missing location", handler: lookupTaxRateHandler, tool: "lookup_tax_rate", header: keyHeader,
+			args: map[string]any{"lat": "33.65"}, wantOutcome: "invalid_arguments", wantStatus: 0},
+		{name: "lookup missing key", handler: lookupTaxRateHandler, tool: "lookup_tax_rate", header: http.Header{},
+			args: map[string]any{"postalcode": "90210"}, wantOutcome: "missing_key", wantStatus: 0},
+		{name: "metrics success", handler: getAccountMetricsHandler, tool: "get_account_metrics", header: keyHeader,
+			upstream: ok, wantOutcome: "ok", wantStatus: 200},
+		{name: "metrics upstream 403 echoing the key", handler: getAccountMetricsHandler, tool: "get_account_metrics", header: keyHeader,
+			upstream: echoKey(http.StatusForbidden), wantOutcome: "upstream_status", wantStatus: 403},
+		{name: "metrics upstream 200 with truncated body", handler: getAccountMetricsHandler, tool: "get_account_metrics", header: keyHeader,
+			upstream: truncated(http.StatusOK), wantOutcome: "upstream_error", wantStatus: 200},
+		{name: "metrics missing key", handler: getAccountMetricsHandler, tool: "get_account_metrics", header: http.Header{},
+			wantOutcome: "missing_key", wantStatus: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdLogs := captureLog(t)
+			logs := captureUsageLog(t)
+
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tt.upstream == nil {
+					t.Error("API was called, want no call")
+					return
+				}
+				tt.upstream(w, r)
+			}))
+			if tt.unreachable {
+				ts.Close()
+			} else {
+				defer ts.Close()
+			}
+
+			request := mcp.CallToolRequest{Header: tt.header}
+			request.Params.Arguments = tt.args
+			if _, err := tt.handler(NewZipTaxClient(ts.URL))(t.Context(), request); err != nil {
+				t.Fatalf("handler error: %v", err)
+			}
+
+			lines := usageLines(t, logs)
+			if len(lines) != 1 {
+				t.Fatalf("got %d usage log lines, want 1: %s", len(lines), logs)
+			}
+			line := lines[0]
+
+			// A fixed field set keeps new fields from slipping arguments
+			// or key material into the log unreviewed.
+			wantFields := []string{"time", "level", "msg", "tool", "key_hash", "missing_key", "outcome", "upstream_status", "latency_ms"}
+			if len(line) != len(wantFields) {
+				t.Errorf("line has fields %v, want exactly %v", slices.Sorted(maps.Keys(line)), wantFields)
+			}
+			for _, f := range wantFields {
+				if _, present := line[f]; !present {
+					t.Errorf("line is missing field %q: %v", f, line)
+				}
+			}
+
+			missingKey := tt.wantOutcome == "missing_key"
+			wantKeyHash := wantHash
+			if missingKey {
+				wantKeyHash = ""
+			}
+			for field, want := range map[string]any{
+				"msg":             "mcp_tool_call",
+				"tool":            tt.tool,
+				"key_hash":        wantKeyHash,
+				"missing_key":     missingKey,
+				"outcome":         tt.wantOutcome,
+				"upstream_status": tt.wantStatus,
+			} {
+				if line[field] != want {
+					t.Errorf("%s = %v, want %v", field, line[field], want)
+				}
+			}
+			if ms, isNum := line["latency_ms"].(float64); !isNum || ms < 0 {
+				t.Errorf("latency_ms = %v, want a non-negative number", line["latency_ms"])
+			}
+
+			assertNoKeyMaterial(t, logs.String(), apiKey)
+			assertNoKeyMaterial(t, stdLogs.String(), apiKey)
+		})
+	}
+}
+
+func TestToolCallUsageLogClassifiesUpstreamTimeout(t *testing.T) {
+	const apiKey = "zt-usage-log-timeout-key"
+	logs := captureUsageLog(t)
+
+	release := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer ts.Close()
+	defer close(release) // runs before ts.Close, so a stuck handler cannot block it
+
+	client := NewZipTaxClient(ts.URL)
+	client.httpClient.Timeout = 50 * time.Millisecond
+
+	request := mcp.CallToolRequest{Header: http.Header{"X-Api-Key": {apiKey}}}
+	if _, err := getAccountMetricsHandler(client)(t.Context(), request); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	lines := usageLines(t, logs)
+	if len(lines) != 1 {
+		t.Fatalf("got %d usage log lines, want 1: %s", len(lines), logs)
+	}
+	if got := lines[0]["outcome"]; got != "upstream_timeout" {
+		t.Errorf("outcome = %v, want upstream_timeout", got)
+	}
+	if got := lines[0]["upstream_status"]; got != float64(0) {
+		t.Errorf("upstream_status = %v, want 0", got)
+	}
+	if ms, _ := lines[0]["latency_ms"].(float64); ms < 50 {
+		t.Errorf("latency_ms = %v, want at least the 50ms client timeout", lines[0]["latency_ms"])
+	}
+	assertNoKeyMaterial(t, logs.String(), apiKey)
 }

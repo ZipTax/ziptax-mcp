@@ -13,6 +13,12 @@ import (
 
 const defaultVersion = "v60"
 
+// Tool names, shared by the tool definitions and their usage log lines.
+const (
+	lookupTaxRateName     = "lookup_tax_rate"
+	getAccountMetricsName = "get_account_metrics"
+)
+
 // errMissingAPIKey is returned when a tool call carries no API key. It
 // must only reference header-based authentication.
 const errMissingAPIKey = "Missing API key. Send it in the X-API-KEY header or as a Bearer token in the Authorization header. Get a key at https://platform.zip.tax"
@@ -57,7 +63,7 @@ func RegisterTools(s *server.MCPServer, client *ZipTaxClient) {
 
 func lookupTaxRateTool() mcp.Tool {
 	tool := mcp.NewTool(
-		"lookup_tax_rate",
+		lookupTaxRateName,
 		mcp.WithTitleAnnotation("Look Up Sales Tax Rate"),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -169,12 +175,7 @@ func stringArg(args map[string]any, name string) (string, error) {
 }
 
 func lookupTaxRateHandler(client *ZipTaxClient) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		apiKey := extractAPIKey(request)
-		if apiKey == "" {
-			return mcp.NewToolResultError(errMissingAPIKey), nil
-		}
-
+	return withUsageLog(lookupTaxRateName, func(ctx context.Context, request mcp.CallToolRequest, apiKey string) (*mcp.CallToolResult, callOutcome) {
 		args := request.GetArguments()
 		params := make(map[string]string)
 		paramNames := []string{
@@ -185,7 +186,7 @@ func lookupTaxRateHandler(client *ZipTaxClient) server.ToolHandlerFunc {
 		for _, name := range paramNames {
 			v, err := stringArg(args, name)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return mcp.NewToolResultError(err.Error()), callOutcome{class: outcomeInvalidArgs}
 			}
 			if v != "" {
 				params[name] = v
@@ -193,23 +194,23 @@ func lookupTaxRateHandler(client *ZipTaxClient) server.ToolHandlerFunc {
 		}
 
 		if params["postalcode"] == "" && params["address"] == "" && (params["lat"] == "" || params["lng"] == "") {
-			return mcp.NewToolResultError("Provide a location: a full street address, or both lat and lng"), nil
+			return mcp.NewToolResultError("Provide a location: a full street address, or both lat and lng"), callOutcome{class: outcomeInvalidArgs}
 		}
 
 		result, err := client.LookupTax(apiKey, defaultVersion, params)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("ZipTax API error: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("ZipTax API error: %v", err)), upstreamOutcome(err)
 		}
 
-		return mcp.NewToolResultText(formatResponse(result)), nil
-	}
+		return mcp.NewToolResultText(formatResponse(result)), upstreamOutcome(nil)
+	})
 }
 
 // --- get_account_metrics ---
 
 func getAccountMetricsTool() mcp.Tool {
 	return mcp.NewTool(
-		"get_account_metrics",
+		getAccountMetricsName,
 		mcp.WithTitleAnnotation("Get Account Usage Metrics"),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
@@ -224,17 +225,12 @@ func getAccountMetricsTool() mcp.Tool {
 }
 
 func getAccountMetricsHandler(client *ZipTaxClient) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		apiKey := extractAPIKey(request)
-		if apiKey == "" {
-			return mcp.NewToolResultError(errMissingAPIKey), nil
-		}
-
+	return withUsageLog(getAccountMetricsName, func(ctx context.Context, request mcp.CallToolRequest, apiKey string) (*mcp.CallToolResult, callOutcome) {
 		result, err := client.GetAccountMetrics(apiKey, defaultVersion)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("ZipTax API error: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("ZipTax API error: %v", err)), upstreamOutcome(err)
 		}
 
-		return mcp.NewToolResultText(formatResponse(result)), nil
-	}
+		return mcp.NewToolResultText(formatResponse(result)), upstreamOutcome(nil)
+	})
 }

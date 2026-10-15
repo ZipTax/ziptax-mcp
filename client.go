@@ -15,6 +15,32 @@ type ZipTaxClient struct {
 	httpClient *http.Client
 }
 
+// APIStatusError is returned when the ZipTax API answers with a status
+// other than 200. Its message reaches MCP clients in tool error results,
+// so its format is kept stable.
+type APIStatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIStatusError) Error() string {
+	return fmt.Sprintf("API returned status %d: %s", e.StatusCode, e.Body)
+}
+
+// ResponseReadError is returned when the ZipTax API answered but its
+// response body could not be read, for example because the connection
+// closed early or timed out. It keeps the status the API answered with.
+type ResponseReadError struct {
+	StatusCode int
+	Err        error
+}
+
+func (e *ResponseReadError) Error() string {
+	return "reading response body: " + e.Err.Error()
+}
+
+func (e *ResponseReadError) Unwrap() error { return e.Err }
+
 // NewZipTaxClient creates a new ZipTax API client.
 func NewZipTaxClient(baseURL string) *ZipTaxClient {
 	return &ZipTaxClient{
@@ -50,11 +76,11 @@ func (c *ZipTaxClient) LookupTax(apiKey, version string, params map[string]strin
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("reading response body: %w", err)
+		return nil, &ResponseReadError{StatusCode: resp.StatusCode, Err: err}
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, &APIStatusError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	return json.RawMessage(body), nil
@@ -79,11 +105,11 @@ func (c *ZipTaxClient) GetAccountMetrics(apiKey, version string) (json.RawMessag
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("reading response body: %w", err)
+		return nil, &ResponseReadError{StatusCode: resp.StatusCode, Err: err}
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, &APIStatusError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	return json.RawMessage(body), nil
