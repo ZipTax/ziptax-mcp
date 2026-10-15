@@ -5,6 +5,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -538,4 +539,93 @@ func TestToolCallUsageLogClassifiesUpstreamTimeout(t *testing.T) {
 		t.Errorf("latency_ms = %v, want at least the 50ms client timeout", lines[0]["latency_ms"])
 	}
 	assertNoKeyMaterial(t, logs.String(), apiKey)
+}
+
+// A transport failure reaches the MCP client as a fixed message. Go's
+// *url.Error text quotes the request URL, whose query carries the raw API
+// key and, for a lookup, the caller's address, so none of the request may
+// appear in the tool result. The usage log still tells a timeout from
+// other failures.
+func TestToolErrorsDoNotEchoTheUpstreamRequest(t *testing.T) {
+	const apiKey = "zt-transport-error-test-key-7f3a"
+	const address = "200 Spectrum Center Dr, Irvine, CA"
+
+	tests := []struct {
+		name        string
+		handler     func(*ZipTaxClient) server.ToolHandlerFunc
+		args        map[string]any
+		stall       bool // the API outlasts the client timeout; otherwise it is unreachable
+		wantText    string
+		wantOutcome string
+	}{
+		{name: "lookup unreachable", handler: lookupTaxRateHandler, args: map[string]any{"address": address},
+			wantText: "ZipTax API error: API request failed: connection failed", wantOutcome: "upstream_error"},
+		{name: "lookup timeout", handler: lookupTaxRateHandler, args: map[string]any{"address": address}, stall: true,
+			wantText: "ZipTax API error: API request failed: timeout", wantOutcome: "upstream_timeout"},
+		{name: "metrics unreachable", handler: getAccountMetricsHandler,
+			wantText: "ZipTax API error: API request failed: connection failed", wantOutcome: "upstream_error"},
+		{name: "metrics timeout", handler: getAccountMetricsHandler, stall: true,
+			wantText: "ZipTax API error: API request failed: timeout", wantOutcome: "upstream_timeout"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs := captureUsageLog(t)
+
+			release := make(chan struct{})
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				select {
+				case <-r.Context().Done():
+				case <-release:
+				}
+			}))
+			if tt.stall {
+				defer ts.Close()
+				defer close(release) // runs before ts.Close, so a stuck handler cannot block it
+			} else {
+				ts.Close()
+			}
+
+			client := NewZipTaxClient(ts.URL)
+			client.httpClient.Timeout = 50 * time.Millisecond
+
+			request := mcp.CallToolRequest{Header: http.Header{"X-Api-Key": {apiKey}}}
+			request.Params.Arguments = tt.args
+			result, err := tt.handler(client)(t.Context(), request)
+			if err != nil {
+				t.Fatalf("handler error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatal("IsError = false, want a tool error result")
+			}
+			if len(result.Content) != 1 {
+				t.Fatalf("got %d content items, want 1", len(result.Content))
+			}
+			content, ok := result.Content[0].(mcp.TextContent)
+			if !ok {
+				t.Fatalf("content is %T, want mcp.TextContent", result.Content[0])
+			}
+
+			if content.Text != tt.wantText {
+				t.Errorf("tool result = %q, want %q", content.Text, tt.wantText)
+			}
+			// Spelled out as well, so a future change to the message
+			// cannot bring any part of the request back.
+			host := strings.TrimPrefix(ts.URL, "http://")
+			for _, leaked := range []string{apiKey, "key=", "?", host, "/request/", "/account/", address, url.QueryEscape(address), "Spectrum"} {
+				if strings.Contains(content.Text, leaked) {
+					t.Errorf("tool result %q contains %q", content.Text, leaked)
+				}
+			}
+
+			lines := usageLines(t, logs)
+			if len(lines) != 1 {
+				t.Fatalf("got %d usage log lines, want 1: %s", len(lines), logs)
+			}
+			if got := lines[0]["outcome"]; got != tt.wantOutcome {
+				t.Errorf("outcome = %v, want %s", got, tt.wantOutcome)
+			}
+			assertNoKeyMaterial(t, logs.String(), apiKey)
+		})
+	}
 }

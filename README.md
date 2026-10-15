@@ -267,7 +267,8 @@ Errors come back as a tool result with `isError: true` and a text message, not a
 | `<parameter> must be a string` or `<parameter> must be a string or number` | A `lookup_tax_rate` parameter was sent with a type it does not accept. |
 | `Provide a location: a full street address, or both lat and lng` | `lookup_tax_rate` was called without `address`, a `lat`/`lng` pair, or `postalcode`. |
 | `ZipTax API error: API returned status <code>: <body>` | The Ziptax API returned a non-200 HTTP status. |
-| `ZipTax API error: API request failed: <detail>` | The Ziptax API could not be reached or did not respond within 15 seconds. |
+| `ZipTax API error: API request failed: timeout` | The Ziptax API did not respond within 15 seconds. |
+| `ZipTax API error: API request failed: connection failed` | The Ziptax API could not be reached, for example a DNS, connection, or TLS failure. |
 
 ## Local Development
 

@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -41,6 +43,36 @@ func (e *ResponseReadError) Error() string {
 
 func (e *ResponseReadError) Unwrap() error { return e.Err }
 
+// APITransportError is returned when the ZipTax API could not be reached
+// or did not answer in time. Its message reaches MCP clients in tool error
+// results, so it names only the kind of failure. net/http's *url.Error
+// quotes the request URL, whose query carries the raw API key and, for a
+// lookup, the caller's address, so that layer is dropped and only its
+// cause is kept, for errors.As.
+type APITransportError struct {
+	err error
+}
+
+// newAPITransportError wraps an error from http.Client.Do, which is always
+// a *url.Error.
+func newAPITransportError(err error) *APITransportError {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		err = urlErr.Err
+	}
+	return &APITransportError{err: err}
+}
+
+func (e *APITransportError) Error() string {
+	var netErr net.Error
+	if errors.As(e.err, &netErr) && netErr.Timeout() {
+		return "API request failed: timeout"
+	}
+	return "API request failed: connection failed"
+}
+
+func (e *APITransportError) Unwrap() error { return e.err }
+
 // NewZipTaxClient creates a new ZipTax API client.
 func NewZipTaxClient(baseURL string) *ZipTaxClient {
 	return &ZipTaxClient{
@@ -70,7 +102,7 @@ func (c *ZipTaxClient) LookupTax(apiKey, version string, params map[string]strin
 
 	resp, err := c.httpClient.Get(u.String())
 	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
+		return nil, newAPITransportError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -99,7 +131,7 @@ func (c *ZipTaxClient) GetAccountMetrics(apiKey, version string) (json.RawMessag
 
 	resp, err := c.httpClient.Get(u.String())
 	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
+		return nil, newAPITransportError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -101,6 +102,8 @@ func TestUpstreamOutcome(t *testing.T) {
 		{name: "connection failure", err: fmt.Errorf("API request failed: %w", errors.New("connection refused")), want: callOutcome{class: outcomeUpstreamError}},
 		{name: "truncated body keeps the status", err: &ResponseReadError{StatusCode: http.StatusServiceUnavailable, Err: io.ErrUnexpectedEOF}, want: callOutcome{class: outcomeUpstreamError, upstreamStatus: http.StatusServiceUnavailable}},
 		{name: "body read timeout keeps the status", err: &ResponseReadError{StatusCode: http.StatusOK, Err: timeoutError{}}, want: callOutcome{class: outcomeUpstreamTimeout, upstreamStatus: http.StatusOK}},
+		{name: "transport timeout", err: newAPITransportError(&url.Error{Op: "Get", URL: "http://api.test/?key=k", Err: timeoutError{}}), want: callOutcome{class: outcomeUpstreamTimeout}},
+		{name: "transport failure", err: newAPITransportError(&url.Error{Op: "Get", URL: "http://api.test/?key=k", Err: errors.New("connection refused")}), want: callOutcome{class: outcomeUpstreamError}},
 	}
 
 	for _, tt := range tests {
