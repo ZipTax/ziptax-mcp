@@ -3,7 +3,7 @@
   "name": "tax.zip/ziptax",
   "title": "Ziptax Sales Tax API",
   "description": "Real-time US and Canadian sales and use tax rates by address or geo coordinates.",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "websiteUrl": "https://docs.zip.tax/guides/agents-and-llms/mcp-server",
   "repository": {
     "url": "https://github.com/ZipTax/ziptax-mcp",
@@ -22,5 +22,33 @@
         }
       ]
     }
-  ]
+  ],
+  "_meta": {
+    "io.modelcontextprotocol.registry/publisher-provided": {
+      "domain": "tax-compliance",
+      "product": "Ziptax",
+      "keywords": [
+        "sales-tax",
+        "use-tax",
+        "sales-tax-rates",
+        "tax-rate-lookup",
+        "tax-calculation",
+        "sales-tax-api",
+        "address-validation",
+        "rooftop-accuracy",
+        "geocoding",
+        "jurisdiction-data",
+        "us-sales-tax",
+        "canada-gst-hst",
+        "zip-code-tax",
+        "e-commerce",
+        "ai-agents",
+        "agentic-commerce",
+        "api",
+        "developer-tools",
+        "finance",
+        "accounting"
+      ]
+    }
+  }
 }
