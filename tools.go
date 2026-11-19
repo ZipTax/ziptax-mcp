@@ -68,7 +68,7 @@ func lookupTaxRateTool() mcp.Tool {
 				"Provide a full street address for door-level accuracy, or a lat/lng pair for a geographic point lookup. "+
 				"Returns tax rates broken down by jurisdiction (state, county, city, district). "+
 				"Each call counts as one billable API call on the API key that makes it, the same as calling the Ziptax API directly. "+
-				"Reuse a result instead of repeating a lookup for the same location and parameters. "+
+				"Within a task, reuse a result instead of repeating the same lookup. "+
 				"Requires a valid ZipTax API key sent in the X-API-KEY header or Authorization header. "+
 				"Get a key at https://platform.zip.tax"),
 		mcp.WithString("postalcode",

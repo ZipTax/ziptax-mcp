@@ -128,7 +128,7 @@ The server exposes two read-only tools.
 
 Look up sales and use tax rates for a US or Canadian location. Returns rates broken down by jurisdiction (state, county, city, district).
 
-Each call counts as one billable API call on the API key that makes it, the same as calling the Ziptax API directly. Reuse a result instead of repeating a lookup for the same location and parameters.
+Each call counts as one billable API call on the API key that makes it, the same as calling the Ziptax API directly. Within a task, reuse a result instead of repeating the same lookup.
 
 #### Location Requirement
 
