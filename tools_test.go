@@ -633,3 +633,16 @@ func TestToolErrorsDoNotEchoTheUpstreamRequest(t *testing.T) {
 		})
 	}
 }
+
+// Metering contract (ZIP-1829): agents must learn at call time that each
+// lookup is one billable API call and that the metrics call is free.
+func TestToolDescriptionsStateBilling(t *testing.T) {
+	lookup := lookupTaxRateTool().Description
+	if !strings.Contains(lookup, "billable API call") {
+		t.Errorf("lookup_tax_rate description missing billable API call note: %q", lookup)
+	}
+	metrics := getAccountMetricsTool().Description
+	if !strings.Contains(metrics, "doesn't count toward billable API calls") {
+		t.Errorf("get_account_metrics description missing free-call note: %q", metrics)
+	}
+}
