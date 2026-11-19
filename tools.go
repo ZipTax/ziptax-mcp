@@ -67,6 +67,8 @@ func lookupTaxRateTool() mcp.Tool {
 			"Look up sales and use tax rates for a US or Canadian location. "+
 				"Provide a full street address for door-level accuracy, or a lat/lng pair for a geographic point lookup. "+
 				"Returns tax rates broken down by jurisdiction (state, county, city, district). "+
+				"Each call counts as one billable API call on the API key that makes it, the same as calling the Ziptax API directly. "+
+				"Within a task, reuse a result instead of repeating the same lookup. "+
 				"Requires a valid ZipTax API key sent in the X-API-KEY header or Authorization header. "+
 				"Get a key at https://platform.zip.tax"),
 		mcp.WithString("postalcode",
@@ -218,6 +220,8 @@ func getAccountMetricsTool() mcp.Tool {
 		mcp.WithDescription(
 			"Get account usage metrics and quota information for the authenticated ZipTax account. "+
 				"Returns current request counts, limits, and entitlements. "+
+				"This call is free and doesn't count toward billable API calls. "+
+				"Use it to check usage before bulk or repeated lookups. "+
 				"Requires a valid ZipTax API key sent in the X-API-KEY header or Authorization header. "+
 				"Get a key at https://platform.zip.tax"),
 	)
