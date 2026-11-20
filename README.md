@@ -289,7 +289,8 @@ docker run -p 8080:8080 ziptax-mcp
 
 The server listens on port `8080` by default:
 
-- `POST /`: MCP endpoint
+- `POST /`: MCP endpoint (stateless Streamable HTTP)
+- `GET /`: returns `405 Method Not Allowed`; the server offers no server-to-client stream
 - `GET /health`: health check, returns `{"status":"ok"}`
 
 ## Environment Variables
