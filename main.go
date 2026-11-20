@@ -43,6 +43,25 @@ func apiKeyFromQuery(next http.Handler) http.Handler {
 	})
 }
 
+// newMCPServer builds the MCP server with its tools registered and every
+// request counted by method in methods.
+func newMCPServer(client *ZipTaxClient, methods *methodCounts) *server.MCPServer {
+	hooks := &server.Hooks{}
+	hooks.AddBeforeAny(methods.count)
+
+	mcpServer := server.NewMCPServer(
+		"ZipTax Sales Tax API",
+		"1.0.7",
+		server.WithToolCapabilities(false),
+		server.WithRecovery(),
+		server.WithInstructions(serverInstructions),
+		server.WithHooks(hooks),
+	)
+
+	RegisterTools(mcpServer, client)
+	return mcpServer
+}
+
 // newMCPHandler builds the stateless Streamable HTTP handler for the MCP
 // endpoint, wrapped so that a ?key= URL parameter is promoted to the
 // X-API-KEY header (backward-compatibility fallback only).
@@ -74,15 +93,13 @@ func main() {
 
 	client := NewZipTaxClient(apiBaseURL)
 
-	mcpServer := server.NewMCPServer(
-		"ZipTax Sales Tax API",
-		"1.0.7",
-		server.WithToolCapabilities(false),
-		server.WithRecovery(),
-		server.WithInstructions(serverInstructions),
-	)
-
-	RegisterTools(mcpServer, client)
+	methods := &methodCounts{}
+	mcpServer := newMCPServer(client, methods)
+	go func() {
+		for range time.Tick(methodCountsInterval) {
+			methods.flush()
+		}
+	}()
 
 	mux := http.NewServeMux()
 
@@ -115,11 +132,17 @@ func main() {
 
 	<-done
 	log.Println("Shutting down server...")
+	// Flush method counts before Shutdown, which can wait out its full
+	// timeout on an open stream and outlast ECS's stop timeout. The
+	// flush after it catches requests that finish while draining.
+	methods.flush()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	err := srv.Shutdown(ctx)
+	methods.flush()
+	if err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
 
