@@ -43,6 +43,24 @@ func apiKeyFromQuery(next http.Handler) http.Handler {
 	})
 }
 
+// newMCPHandler builds the stateless Streamable HTTP handler for the MCP
+// endpoint, wrapped so that a ?key= URL parameter is promoted to the
+// X-API-KEY header (backward-compatibility fallback only).
+//
+// GET is answered with 405 rather than a listen stream. A stateless server
+// gives every GET a fresh session that no POST ever reaches, so the stream
+// would never carry a message, and behind the ALB its headers are held
+// until the 60 s idle timeout. The MCP spec allows 405 here; clients fall
+// back to POST only.
+func newMCPHandler(mcpServer *server.MCPServer) http.Handler {
+	httpServer := server.NewStreamableHTTPServer(mcpServer,
+		server.WithEndpointPath("/"),
+		server.WithStateLess(true),
+		server.WithDisableStreaming(true),
+	)
+	return apiKeyFromQuery(httpServer)
+}
+
 func main() {
 	apiBaseURL := os.Getenv("ZIPTAX_API_BASE_URL")
 	if apiBaseURL == "" {
@@ -74,13 +92,7 @@ func main() {
 		_, _ = fmt.Fprint(w, `{"status":"ok"}`)
 	})
 
-	httpServer := server.NewStreamableHTTPServer(mcpServer,
-		server.WithEndpointPath("/"),
-		server.WithStateLess(true),
-	)
-	// Wrap the MCP handler so that a ?key= URL parameter is promoted to
-	// the X-API-KEY header (backward-compatibility fallback only).
-	mux.Handle("/", apiKeyFromQuery(httpServer))
+	mux.Handle("/", newMCPHandler(mcpServer))
 
 	addr := fmt.Sprintf("0.0.0.0:%s", port)
 	srv := &http.Server{
