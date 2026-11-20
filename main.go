@@ -62,14 +62,22 @@ func newMCPServer(client *ZipTaxClient, methods *methodCounts) *server.MCPServer
 	return mcpServer
 }
 
-// newMCPHandler serves mcpServer over stateless Streamable HTTP. A ?key=
-// URL parameter is promoted to the X-API-KEY header
-// (backward-compatibility fallback only).
+// newMCPHandler builds the stateless Streamable HTTP handler for the MCP
+// endpoint, wrapped so that a ?key= URL parameter is promoted to the
+// X-API-KEY header (backward-compatibility fallback only).
+//
+// GET is answered with 405 rather than a listen stream. A stateless server
+// gives every GET a fresh session that no POST ever reaches, so the stream
+// would never carry a message, and behind the ALB its headers are held
+// until the 60 s idle timeout. The MCP spec allows 405 here; clients fall
+// back to POST only.
 func newMCPHandler(mcpServer *server.MCPServer) http.Handler {
-	return apiKeyFromQuery(server.NewStreamableHTTPServer(mcpServer,
+	httpServer := server.NewStreamableHTTPServer(mcpServer,
 		server.WithEndpointPath("/"),
 		server.WithStateLess(true),
-	))
+		server.WithDisableStreaming(true),
+	)
+	return apiKeyFromQuery(httpServer)
 }
 
 func main() {

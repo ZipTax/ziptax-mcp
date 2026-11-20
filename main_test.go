@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log"
 	"net/http"
@@ -9,6 +10,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/mark3labs/mcp-go/server"
 )
 
 // captureLog redirects the standard logger to a buffer for the duration
@@ -155,4 +159,42 @@ func TestKeyParamToolCallIsLoggedWithoutKeyMaterial(t *testing.T) {
 	}
 	assertNoKeyMaterial(t, logs.String(), apiKey)
 	assertNoKeyMaterial(t, stdLogs.String(), apiKey)
+}
+
+func TestMCPHandler(t *testing.T) {
+	handler := newMCPHandler(server.NewMCPServer("test", "0.0.0"))
+
+	t.Run("GET is rejected with 405 instead of opening a stream", func(t *testing.T) {
+		// A listen stream would block until the context ends, so a short
+		// deadline turns a hang into a test failure rather than a stuck run.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		start := time.Now()
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx))
+
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+		}
+		if elapsed := time.Since(start); elapsed > time.Second {
+			t.Errorf("GET took %s, want an immediate response", elapsed)
+		}
+	})
+
+	t.Run("POST initialize still succeeds", func(t *testing.T) {
+		body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}`
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), `"serverInfo"`) {
+			t.Errorf("initialize response missing serverInfo: %s", rec.Body.String())
+		}
+	})
 }
